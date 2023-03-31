@@ -153,6 +153,19 @@ Resources:
       ManagedPolicyArns:
         - Fn::ImportValue: !Sub "cep-${Env}-common-build-project-policy"
 
+  DynamoDBTableItemBuildProjectRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+        Version: '2012-10-17'
+      ManagedPolicyArns:
+        - Fn::ImportValue: !Sub "cep-${Env}-common-build-project-policy"
+
   CloudFrontWebAclAssociationBuildProjectRole:
     Type: AWS::IAM::Role
     Properties:
@@ -274,6 +287,34 @@ Resources:
       PolicyName: delete-bucket-contents-build-project-policy
       Roles:
         - !Ref S3DeleteBucketContentsBuildProjectRole
+
+  DynamoDBTableItemBuildProjectRolePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyDocument:
+        Statement:
+          - Action:
+              - iam:CreateRole
+              - iam:DeleteRole
+              - iam:GetRole
+              - dynamodb:*
+            Effect: Allow
+            Resource: "*"
+          - Action:
+              - codebuild:StartBuild
+              - codebuild:BatchGetBuilds
+              - codebuild:StopBuild
+              - codebuild:RetryBuild
+              - codebuild:StartBuildBatch
+              - codebuild:RetryBuildBatch
+              - codebuild:StopBuildBatch
+            Effect: Allow
+            Resource: 
+              - !GetAtt DynamoDBTableItemBuildProject.Arn
+        Version: '2012-10-17'
+      PolicyName: delete-bucket-contents-build-project-policy
+      Roles:
+        - !Ref DynamoDBTableItemBuildProjectRole
 
   CloudFrontWebAclAssociationBuildProjectPolicy:
     Type: AWS::IAM::Policy
@@ -478,6 +519,28 @@ Resources:
         BuildSpec: !Sub "resources/${Env}-buildspec-python.yml"
       # BuildBatchConfig:
       #   ServiceRole: !GetAtt S3DeleteBucketContentsBuildProjectRole.Arn
+      TimeoutInMinutes: 480
+
+  DynamoDBTableItemBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "${PrefixLower}-${Env}-dynamodb-item"
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        ComputeType: BUILD_GENERAL1_LARGE
+        Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/cep-cicd:latest"
+        ImagePullCredentialsType: SERVICE_ROLE
+        PrivilegedMode: true
+        Type: LINUX_CONTAINER
+        EnvironmentVariables:
+        - Name: RESOURCE_PATH
+          Type: PLAINTEXT
+          Value: "placeholder-for-path-to-resource"
+      ServiceRole: !GetAtt DynamoDBTableItemBuildProjectRole.Arn
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Sub "resources/${Env}-buildspec-python.yml"
       TimeoutInMinutes: 480
 
   S3BucketVersioningEnabledBuildProject:
@@ -932,6 +995,30 @@ Resources:
                       "name": "RESOURCE_PATH",
                       "type": "PLAINTEXT",
                       "value": "resources/Account_AlternateContact"
+                    }
+                  ]
+              RunOrder: 1
+            - Name: DynamoDB_Item
+              InputArtifacts:
+                - Name: extensions-source
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              Configuration:
+                ProjectName: !Ref DynamoDBTableItemBuildProject
+                # BatchEnabled: 
+                #   !If
+                #     - IsProd
+                #     - true
+                #     - false
+                EnvironmentVariables: |-
+                  [
+                    {
+                      "name": "RESOURCE_PATH",
+                      "type": "PLAINTEXT",
+                      "value": "resources/DynamoDB_Item"
                     }
                   ]
               RunOrder: 1
